@@ -1,0 +1,91 @@
+{
+  "streamer_name": "栞栞Shiori",
+  "version": 1,
+  "description": "栞栞Shiori 默认一键切片+投稿配置",
+  "step1_prepare": {
+    "convert_flv": true,
+    "portrait_to_landscape": true,
+    "burn_danmu": false
+  },
+  "step2_subtitle": {
+    "engine": "funasr",
+    "model": "SenseVoiceSmall",
+    "language": "zh",
+    "vad": true,
+    "speaker_diarization": false
+  },
+  "step3_highlight": {
+    "mode": "llm",
+    "prompt_dir": ""
+  },
+  "step4_clip": {
+    "output_dir": "{input_dir}/切片"
+  },
+  "step5_burn": {
+    "enabled": false,
+    "skip_asr": false,
+    "engine": "qwen3",
+    "model": "Qwen3-ASR-0.6B",
+    "language": "zh",
+    "vad": true,
+    "font": "抖音美好体.otf",
+    "font_size": 80,
+    "outline": 5,
+    "shadow": true,
+    "shadow_color": "white",
+    "margin_v": 100,
+    "color": "&H00c4f3f9",
+    "outline_color": "&H0038424a"
+  },
+  "step6_cover": {
+    "style": "random_1_4",
+    "font": "抖音美好体.otf",
+    "output_dir": "{input_dir}/切片/封面",
+    "match_subbed_only": true
+  },
+  "step7_upload": {
+    "tid": 27,
+    "title_suffix_name": "小栞",
+    "tid_name": "动画·综合",
+    "copyright": "original",
+    "no_reprint": false,
+    "title_rule": "从文件名提取: 去掉 [HH-MM-S] 时间戳前缀 和 _subbed 后缀",
+    "desc_template": "栞栞Shiori的个人主页：https://space.bilibili.com/1609526545\n栞栞Shiori的直播间：https://live.bilibili.com/26966466\n\n{summary}",
+    "cover_rule": "{input_dir}/切片/封面/[{timestamp}] {title}.jpg",
+    "tags": [
+      "虚拟主播",
+      "ai切片",
+      "小栞"
+    ]
+  },
+  "bilibili_links": {
+    "space": "https://space.bilibili.com/1609526545",
+    "live": "https://live.bilibili.com/26966466"
+  },
+  "keywords": [
+    "C*M",
+    "乳贴",
+    "克罗雅",
+    "十六萤",
+    "大果",
+    "岁己",
+    "岁栞",
+    "弥月",
+    "水煎",
+    "灰泽满",
+    "白切鸡不如椰子鸡",
+    "粤帮话事人",
+    "老弥",
+    "跳楼机",
+    "进入身体",
+    "287新人",
+    "ttk",
+    "ylg",
+    "小弥",
+    "小路",
+    "蚌埠住了",
+    "兵",
+    "妈妈",
+    "自恋"
+  ]
+}

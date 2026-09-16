@@ -1,0 +1,79 @@
+{
+  "streamer_name": "四时小路Komichi",
+  "version": 1,
+  "description": "四时小路Komichi 默认一键切片+投稿配置",
+  "step1_prepare": {
+    "convert_flv": true,
+    "portrait_to_landscape": true,
+    "burn_danmu": false
+  },
+  "step2_subtitle": {
+    "engine": "funasr",
+    "model": "SenseVoiceSmall",
+    "language": "zh",
+    "vad": true,
+    "speaker_diarization": false
+  },
+  "step3_highlight": {
+    "mode": "llm",
+    "prompt_dir": ""
+  },
+  "step4_clip": {
+    "output_dir": "{input_dir}/切片"
+  },
+  "step5_burn": {
+    "enabled": false,
+    "skip_asr": false,
+    "engine": "qwen3",
+    "model": "Qwen3-ASR-0.6B",
+    "language": "zh",
+    "vad": true,
+    "font": "抖音美好体.otf",
+    "font_size": 80,
+    "outline": 5,
+    "shadow": true,
+    "shadow_color": "white",
+    "margin_v": 100,
+    "color": "&H00f6dcb7",
+    "outline_color": "&H00000000"
+  },
+  "step6_cover": {
+    "style": "random_1_4",
+    "font": "抖音美好体.otf",
+    "output_dir": "{input_dir}/切片/封面",
+    "match_subbed_only": true
+  },
+  "step7_upload": {
+    "tid": 27,
+    "title_suffix_name": "小路",
+    "tid_name": "动画·综合",
+    "copyright": "original",
+    "no_reprint": false,
+    "title_rule": "从文件名提取",
+    "desc_template": "",
+    "cover_rule": "{input_dir}/切片/封面/[{timestamp}] {title}.jpg",
+    "tags": [
+      "虚拟主播",
+      "ai切片",
+      "小路"
+    ]
+  },
+  "bilibili_links": {
+    "space": "https://space.bilibili.com/1512246445",
+    "live": "https://live.bilibili.com/1700301235"
+  },
+  "keywords": [
+    "千舰",
+    "路神",
+    "奶龙",
+    "全力路模式",
+    "顶美",
+    "维阿信",
+    "咕咕嘎嘎",
+    "八八六十一",
+    "丈育",
+    "无表情小路",
+    "虹血",
+    "首嗦"
+  ]
+}

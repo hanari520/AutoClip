@@ -1,0 +1,95 @@
+{
+  "streamer_name": "灰泽满Hazel",
+  "version": 1,
+  "description": "灰泽满Hazel 默认一键切片+投稿配置",
+  "step1_prepare": {
+    "convert_flv": true,
+    "portrait_to_landscape": true,
+    "burn_danmu": false
+  },
+  "step2_subtitle": {
+    "engine": "funasr",
+    "model": "SenseVoiceSmall",
+    "language": "zh",
+    "vad": true,
+    "speaker_diarization": false
+  },
+  "step3_highlight": {
+    "mode": "llm",
+    "prompt_dir": ""
+  },
+  "step4_clip": {
+    "output_dir": "{input_dir}/切片"
+  },
+  "step5_burn": {
+    "enabled": true,
+    "skip_asr": false,
+    "engine": "qwen3",
+    "model": "Qwen3-ASR-0.6B",
+    "language": "zh",
+    "vad": true,
+    "font": "抖音美好体.otf",
+    "font_size": 80,
+    "outline": 5,
+    "shadow": true,
+    "shadow_color": "white",
+    "margin_v": 100,
+    "color": "&H00f6dcb7",
+    "outline_color": "&H00000000"
+  },
+  "step6_cover": {
+    "style": "random_1_4",
+    "font": "抖音美好体.otf",
+    "output_dir": "{input_dir}/切片/封面",
+    "match_subbed_only": true
+  },
+  "step7_upload": {
+    "tid": 27,
+    "title_suffix_name": "小满",
+    "tid_name": "动画·综合",
+    "copyright": "original",
+    "no_reprint": false,
+    "title_rule": "从文件名提取",
+    "desc_template": "",
+    "cover_rule": "{input_dir}/切片/封面/[{timestamp}] {title}.jpg",
+    "tags": [
+      "虚拟主播",
+      "ai切片",
+      "小满"
+    ]
+  },
+  "bilibili_links": {
+    "space": "https://space.bilibili.com/1298779265",
+    "live": "https://live.bilibili.com/1713546334"
+  },
+  "keywords": [
+    "277团建",
+    "中国楞",
+    "少一点天分",
+    "扫叫猪叫",
+    "晒痕",
+    "满弟/满姐",
+    "澳洲暗示姐",
+    "男标志",
+    "硅胶",
+    "绿冻",
+    "舞",
+    "败犬",
+    "败犬女主太多了",
+    "香肠游戏",
+    "黑名单",
+    "老先生",
+    "顶美",
+    "脑控",
+    "VR信",
+    "287",
+    "holo摇",
+    "看一辈子灰泽满",
+    "峰哥",
+    "只玩真实",
+    "冷脸家暴女",
+    "峰哥祝福",
+    "千舰",
+    "家暴女"
+  ]
+}

@@ -1,0 +1,78 @@
+{
+  "streamer_name": "瑞娅/岁己/栞栞/弥月/三理",
+  "version": 1,
+  "description": "瑞娅/岁己/栞栞/弥月/三理 默认一键切片+投稿配置",
+  "step1_prepare": {
+    "convert_flv": true,
+    "keep_flv_source": false,
+    "overwrite": false,
+    "portrait_to_landscape": true,
+    "portrait_overwrite": false,
+    "delete_portrait_source": false,
+    "landscape_width": 1920,
+    "landscape_height": 1080,
+    "landscape_blur": 20,
+    "burn_danmu": true,
+    "burn_danmu_overwrite": false,
+    "keep_danmu_ass": false,
+    "recursive": false
+  },
+  "step2_subtitle": {
+    "engine": "funasr",
+    "model": "SenseVoiceSmall",
+    "language": "zh",
+    "vad": true,
+    "speaker_diarization": false
+  },
+  "step3_highlight": {
+    "mode": "llm",
+    "prompt_dir": ""
+  },
+  "step4_clip": {
+    "output_dir": "{input_dir}/切片"
+  },
+  "step5_burn": {
+    "enabled": false,
+    "skip_asr": false,
+    "engine": "qwen3",
+    "model": "Qwen3-ASR-0.6B",
+    "language": "zh",
+    "vad": true,
+    "font": "MaoKenShiJinHei-2.ttf",
+    "font_size": 80,
+    "outline": 5,
+    "shadow": true,
+    "shadow_color": "black",
+    "margin_v": 100,
+    "color": "&H00FFFFFF",
+    "outline_color": "&H003718ff"
+  },
+  "step6_cover": {
+    "style": "random_1_4",
+    "font": "MaoKenShiJinHei-2.ttf",
+    "output_dir": "{input_dir}/切片/封面",
+    "match_subbed_only": true
+  },
+  "step7_upload": {
+    "tid": 27,
+    "tid_name": "动画·综合",
+    "copyright": "original",
+    "no_reprint": false,
+    "title_rule": "从文件名提取",
+    "desc_template": "",
+    "cover_rule": "{input_dir}/切片/封面/[{timestamp}] {title}.jpg",
+    "tags": [
+      "虚拟主播",
+      "ai切片",
+      "瑞娅_Rhea",
+      "岁己SUI",
+      "栞栞Shiori",
+      "弥月Mizuki",
+      "三理Mit3uri"
+    ]
+  },
+  "bilibili_links": {
+    "space": "https://space.bilibili.com/1954091502",
+    "live": "https://live.bilibili.com/25788785"
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "enabled": true,
+  "sendkey": "SCTxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "serverchan_url": "",
+  "webhook_path": "/webhook/mikufansrecorder",
+  "notify_events": [
+    "StreamStarted",
+    "StreamEnded",
+    "SessionEnded"
+  ],
+  "dedupe_seconds": 90,
+  "timeout_seconds": 10,
+  "log_file": "",
+  "title_templates": {
+    "StreamStarted": "开播: {name} - {title}",
+    "StreamEnded": "下播: {name}",
+    "SessionEnded": "录制结束: {name} - {title}",
+    "SessionStarted": "开始录制: {name} - {title}",
+    "FileClosed": "录制文件完成: {name}"
+  },
+  "cookie_monitor": {
+    "enabled": true,
+    "recorder_config_path": "",
+    "check_on_start": true,
+    "interval_seconds": 21600,
+    "notify_cooldown_seconds": 43200,
+    "backup_on_start": true,
+    "backup_dir": "",
+    "nav_api": "https://api.bilibili.com/x/web-interface/nav",
+    "refresh_from_autoclip": true,
+    "autoclip_config_path": "",
+    "auto_update": false,
+    "cookie_source_path": ""
+  }
+}

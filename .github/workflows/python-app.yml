@@ -1,0 +1,41 @@
+name: Python application
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.10"
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install flake8 pytest
+
+    - name: Lint with flake8
+      run: |
+        LINT_PATHS=$(git ls-files '*.py' ':!:funasr/app/**')
+        flake8 $LINT_PATHS --count --select=E9,F63,F7,F82 --show-source --statistics
+
+    - name: Test with pytest
+      run: |
+        TEST_PATHS=$(git ls-files 'tests/**/*.py' 'test_*.py' '*_test.py' ':!:funasr/app/**')
+        if [ -n "$TEST_PATHS" ]; then
+          pytest $TEST_PATHS
+        else
+          echo "No pytest tests found; skipping."
+        fi

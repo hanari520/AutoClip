@@ -1,0 +1,88 @@
+{
+  "streamer_name": "岁己SUI",
+  "version": 1,
+  "description": "岁己SUI 默认一键切片+投稿配置",
+  "step1_prepare": {
+    "convert_flv": true,
+    "portrait_to_landscape": true,
+    "burn_danmu": false
+  },
+  "step2_subtitle": {
+    "engine": "funasr",
+    "model": "SenseVoiceSmall",
+    "language": "zh",
+    "vad": true,
+    "speaker_diarization": false
+  },
+  "step3_highlight": {
+    "mode": "llm",
+    "prompt_dir": ""
+  },
+  "step4_clip": {
+    "output_dir": "{input_dir}/切片"
+  },
+  "step5_burn": {
+    "enabled": false,
+    "skip_asr": false,
+    "engine": "qwen3",
+    "model": "Qwen3-ASR-0.6B",
+    "language": "zh",
+    "vad": true,
+    "font": "抖音美好体.otf",
+    "font_size": 80,
+    "outline": 5,
+    "shadow": true,
+    "shadow_color": "black",
+    "margin_v": 100,
+    "color": "&H00FFFFFF",
+    "outline_color": "&H003718ff"
+  },
+  "step6_cover": {
+    "style": "random_1_4",
+    "font": "抖音美好体.otf",
+    "output_dir": "{input_dir}/切片/封面",
+    "match_subbed_only": true
+  },
+  "step7_upload": {
+    "tid": 27,
+    "title_suffix_name": "小岁",
+    "tid_name": "动画·综合",
+    "copyright": "original",
+    "no_reprint": false,
+    "title_rule": "从文件名提取",
+    "desc_template": "",
+    "cover_rule": "{input_dir}/切片/封面/[{timestamp}] {title}.jpg",
+    "tags": [
+      "虚拟主播",
+      "ai切片",
+      "小岁"
+    ]
+  },
+  "bilibili_links": {
+    "space": "https://space.bilibili.com/1954091502",
+    "live": "https://live.bilibili.com/25788785"
+  },
+  "keywords": [
+    "I♥CBM",
+    "假小子角色",
+    "大伙又来舞了",
+    "岁栞设问",
+    "斐济杯",
+    "栞栞",
+    "植物大战僵尸不算游戏力",
+    "欠债梗",
+    "沉默术士",
+    "海海",
+    "白切鸡不如椰子鸡",
+    "粤帮",
+    "臭脚民",
+    "茶茶的",
+    "虚拟电子厂",
+    "岁栞",
+    "串子岁己",
+    "蜘蛛侠反应",
+    "最喜欢系列",
+    "维阿/VR",
+    "四时小路"
+  ]
+}

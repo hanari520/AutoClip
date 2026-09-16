@@ -1,0 +1,22 @@
+# AutoClip 基础依赖（Python 3.10+）
+# 安装: python -m pip install -r configs/requirements.txt
+
+# ── 核心（GUI / Web 控制台 / 流水线）──
+fonttools==4.60.1
+Pillow==12.0.0
+Requests==2.32.5
+PyQt6                # 桌面 GUI（只用 Web 控制台/CLI 可不装）
+
+# ── B 站登录与投稿 ──
+bilibili-api          # QR 扫码登录 + 视频投稿
+
+# ── ASR 语音识别（按所选引擎按需安装）──
+openai-whisper        # whisper 引擎（本地 .pt 模型）
+faster-whisper        # whisper/belle 引擎的 ct2 后端（belle 引擎必需）
+numpy
+torch                 # funasr/qwen3/whisper 均依赖；GPU 版参考官方索引安装
+torchaudio
+
+# ── 可选（仅使用对应功能时安装）──
+# funasr               # funasr 引擎 direct 模式（也可用 funasr/runtime 便携运行时，见 README）
+# modelscope           # emotion2vec 情绪分析模型的下载缓存

@@ -1,0 +1,76 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.worktrees/
+
+# Virtual environments and local runtimes
+.venv/
+venv/
+env/
+ENV/
+funasr/runtime/
+
+# Local application state
+sessions/
+thumbnails/
+backups/
+debug_response.txt
+.mimosa/
+*.log
+*.jsonl
+*.pid
+*.tmp
+*.temp
+
+# Downloaded or generated media/model artifacts
+models/
+funasr/workspace/
+*.mp4
+*.flv
+*.mkv
+*.mov
+*.avi
+*.wav
+*.mp3
+*.aac
+*.srt
+*.ass
+
+# Local/private configuration
+.env
+.env.*
+configs/gui_config.json
+configs/serverchan_config.json
+configs/bilirecorder_cookie_source.txt
+configs/*cookie*.json
+configs/*cookie*.txt
+
+# Keep shareable config templates
+!configs/*.example.json
+!configs/*.example.txt
+
+# OS and editor noise
+.DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/
+*.swp
+*.swo
+qwen3_env/
+.pip_cache/
+
+# Agent-tool plugin state (local caches with machine-specific paths)
+.v2c/
+.video_agent/
+out/
+.zcode/
+
+# 商用需单独授权的字体，不入库（本地保留）
+assets/font/WenYue-XinQingNianTi-W8-J-2.otf
