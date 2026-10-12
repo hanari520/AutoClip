@@ -22,7 +22,7 @@
     "output_dir": "{input_dir}/切片"
   },
   "step5_burn": {
-    "enabled": true,
+    "enabled": false,
     "skip_asr": false,
     "engine": "qwen3",
     "model": "Qwen3-ASR-0.6B",
