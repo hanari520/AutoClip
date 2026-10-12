@@ -258,6 +258,9 @@ def run_step1_prepare(input_dir, cfg):
             danmu_cmd.append('--overwrite')
         if s1.get('keep_danmu_ass'):
             danmu_cmd.append('--keep-ass')
+        # 并行路数：缺省用脚本默认（2 路）；配置里显式写了才覆盖
+        if s1.get('burn_danmu_jobs'):
+            danmu_cmd.extend(['--jobs', str(s1.get('burn_danmu_jobs'))])
         rc = run_cmd(danmu_cmd, '步骤1-3: 压制弹幕')
         if rc != 0:
             return rc

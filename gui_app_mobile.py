@@ -722,6 +722,9 @@ class WorkerThread(QThread):
                 cmd.append('--overwrite')
             if s1.get('keep_danmu_ass'):
                 cmd.append('--keep-ass')
+            # 并行路数：缺省用脚本默认（2 路）；配置里显式写了才覆盖
+            if s1.get('burn_danmu_jobs'):
+                cmd.extend(['--jobs', str(s1.get('burn_danmu_jobs'))])
             commands.append(('步骤1-3: 压制弹幕', cmd))
 
         return commands
@@ -740,6 +743,9 @@ class WorkerThread(QThread):
             qwen3_model = s2.get('model', 'Qwen3-ASR-1.7B')
             if qwen3_model in QWEN3_ASR_MODELS:
                 cmd.extend(['--qwen3-model', qwen3_model])
+        elif engine == 'moss':
+            # MOSS-Transcribe: models/ 下默认模型目录，无需额外参数
+            pass
         else:
             cmd.extend(['--model', s2.get('model', os.path.join(WHISPER_MODEL_DIR, 'large-v3-turbo.pt'))])
             if s2.get('auto_lang'):
@@ -1245,6 +1251,9 @@ class WorkerThread(QThread):
                 cmd.append('--overwrite')
             if self.params.get('keep_ass'):
                 cmd.append('--keep-ass')
+            # 并行路数：缺省用脚本默认（2 路）
+            if self.params.get('jobs'):
+                cmd.extend(['--jobs', str(self.params.get('jobs'))])
 
         elif self.task_type == 'subtitles':
             engine = self.params.get('engine', 'portable')
@@ -2426,6 +2435,7 @@ class AutoClipGUI(QMainWindow):
         self.asr_engine.addItem('Whisper (本地通用)', 'whisper')
         self.asr_engine.addItem('Belle (中文优化)', 'belle')
         self.asr_engine.addItem('Qwen3-ASR (Qwen官方本地)', 'qwen3')
+        self.asr_engine.addItem('MOSS-Transcribe (转写+说话人分离)', 'moss')
         self.asr_engine.currentTextChanged.connect(self.on_engine_changed)
         step2_layout.addWidget(self.asr_engine, 1, 1)
 
@@ -2639,6 +2649,7 @@ class AutoClipGUI(QMainWindow):
         self.subtitle_asr_engine.addItem('Whisper (本地通用)', 'whisper')
         self.subtitle_asr_engine.addItem('Belle (中文优化)', 'belle')
         self.subtitle_asr_engine.addItem('Qwen3-ASR (Qwen官方本地)', 'qwen3')
+        self.subtitle_asr_engine.addItem('MOSS-Transcribe (转写+说话人分离)', 'moss')
         self.subtitle_asr_engine.setCurrentIndex(1)  # 默认 whisper
         self.subtitle_asr_engine.currentTextChanged.connect(self.on_subtitle_engine_changed)
         step5_layout.addWidget(self.subtitle_asr_engine, 2, 1)
@@ -3295,11 +3306,12 @@ class AutoClipGUI(QMainWindow):
         is_funasr = (engine_key == 'funasr')
         is_belle = (engine_key == 'belle')
         is_qwen3 = (engine_key == 'qwen3')
+        is_moss = (engine_key == 'moss')
 
         params = {
             'input_dir': self.whisper_input_dir.text(),
             'language': self.whisper_lang.currentText(),
-            'engine': 'qwen3' if is_qwen3 else ('belle' if is_belle else ('portable' if is_funasr else 'whisper')),
+            'engine': 'qwen3' if is_qwen3 else ('belle' if is_belle else ('portable' if is_funasr else ('moss' if is_moss else 'whisper'))),
         }
 
         if is_belle:
@@ -3307,6 +3319,9 @@ class AutoClipGUI(QMainWindow):
             pass
         elif is_qwen3:
             params['qwen3_model'] = self.qwen3_model.currentData() or 'Qwen3-ASR-1.7B'
+        elif is_moss:
+            # MOSS 使用 models/ 下默认模型目录，无需额外参数
+            pass
         elif is_funasr:
             params['funasr_model'] = self.funasr_model.currentData() or 'sensevoice'
             params['speaker'] = self.funasr_speaker.isChecked()
@@ -3359,6 +3374,9 @@ class AutoClipGUI(QMainWindow):
             asr_model = 'belle-whisper-large-v3-turbo-zh'
         elif is_qwen3:
             asr_model = self.subtitle_qwen3_model.currentData() or 'Qwen3-ASR-1.7B'
+        elif engine_key == 'moss':
+            # MOSS 忽略 --asr-model，仅用于日志展示
+            asr_model = 'MOSS-Transcribe-Diarize-0.9B'
         elif is_funasr:
             asr_model = self.subtitle_asr_model.currentData() or 'sensevoice'
         else:

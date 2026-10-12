@@ -482,7 +482,10 @@ python core/convert_portrait_to_landscape.py -i "录播目录" --delete-source
 - 如果同名 `原名-弹幕版.mp4` 已存在，默认跳过，避免重复压制。
 - 使用 `DanmakuFactory.exe` 将 XML 转为临时 ASS。
 - 使用 FFmpeg 将 ASS 烧录进 MP4。
-- 视频编码使用 `h264_nvenc`，`-preset p1` + `-cq 23`（2026-09-10 起；与步骤1-2 同步提速）。
+- 视频编码使用 `h264_nvenc`，`-preset p1` + `-cq 23`（2026-09-10 起；与步骤1-2 同步提速）。启动时会探测 `h264_nvenc` 是否可用，不可用时回退 `libx264 -preset veryfast -crf 23`（软编约慢 2 倍，但不会整批失败）。
+- 多文件默认 2 路并行（`--jobs`，2026-09-20 起）。瓶颈是 libass 的逐帧渲染：它是单线程的，一路压制只占满一个核，因此并行是唯一有效的提速手段。实测 2 个 5.5 分钟 1080p60 片段：串行 131s → 2 路 64-72s（约 1.9x），占用约 7 个逻辑核。再往上加路数收益递减，因为 NVENC 编码器是共享的硬件瓶颈。
+- 压制子进程以低于正常优先级运行（`--priority below`），Windows 会把 CPU 优先给前台程序；机器空闲时速度不受影响。
+- `--hwaccel` 可把解码交给 GPU：实测 CPU 从约 7 核降到约 4 核，但墙钟时间慢约 25%，默认关闭。
 - 使用 `ffprobe` 读取源 MP4 的显示分辨率，按实际宽高生成 ASS；例如竖屏 `720x1280` 会传给 DanmakuFactory `--resolution 720x1280`，不会强制套用 `1920x1080`。
 - 如果视频带旋转元数据，会按显示方向交换宽高；读取失败时才回退 `1920x1080`。
 - 弹幕版命名规则与 biliLive-tools 一致: `原名-弹幕版.mp4`；如果文件已存在，默认跳过，传入 `--overwrite` 时才重新压制覆盖。
@@ -495,6 +498,8 @@ python core/burn_danmu_video.py -i "录播目录"
 python core/burn_danmu_video.py -i "录播目录" --recursive
 python core/burn_danmu_video.py -i "录播目录" --overwrite  # 强制重压已有弹幕版
 python core/burn_danmu_video.py -i "录播目录" --keep-ass
+python core/burn_danmu_video.py -i "录播目录" --jobs 1     # 退回串行（占用最低）
+python core/burn_danmu_video.py -i "录播目录" --hwaccel    # GPU 解码，省 CPU 但慢约 25%
 ```
 
 主播配置可选字段:
@@ -504,7 +509,8 @@ python core/burn_danmu_video.py -i "录播目录" --keep-ass
   "step1_prepare": {
     "burn_danmu": true,
     "burn_danmu_overwrite": false,
-    "keep_danmu_ass": false
+    "keep_danmu_ass": false,
+    "burn_danmu_jobs": 2
   }
 }
 ```

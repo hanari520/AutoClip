@@ -419,7 +419,7 @@ def main():
     parser.add_argument('--srt-dir', help='SRT 输出目录（默认: 与切片同目录）')
     # ASR 参数
     parser.add_argument('--asr-engine', default='portable',
-                        choices=['portable', 'direct', 'whisper', 'belle', 'qwen3'],
+                        choices=['portable', 'direct', 'whisper', 'belle', 'qwen3', 'moss'],
                         help='ASR 引擎 (default: portable)')
     parser.add_argument('--asr-model', default='sensevoice',
                         help='ASR 模型 (default: sensevoice)')
@@ -478,6 +478,9 @@ def main():
             from qwen3_asr_transcriber import Qwen3ASRTranscriber
             transcriber = Qwen3ASRTranscriber(
                 model_name=args.asr_model, device=args.asr_device)
+        elif args.asr_engine == 'moss':
+            from moss_transcriber import MossTranscriber
+            transcriber = MossTranscriber(device=args.asr_device)
         else:
             transcriber = FunASRTranscriber(
                 model_name=args.asr_model,
@@ -659,6 +662,18 @@ def main():
                         seg = result.get('segments', 0)
                         rt = result.get('transcribe_time', 0)
                         print(f"   ✅ Qwen3-ASR 完成: {seg} 条字幕 ({rt:.1f}s)")
+                elif args.asr_engine == 'moss':
+                    result = transcriber.transcribe_video(
+                        mp4_path, srt_path,
+                        language=args.asr_language,
+                        verbose=False,
+                    )
+                    if isinstance(result, str):
+                        print(f"   ✅ MOSS-Transcribe 完成")
+                    else:
+                        seg = result.get('segments', 0)
+                        rt = result.get('transcribe_time', 0)
+                        print(f"   ✅ MOSS-Transcribe 完成: {seg} 条字幕 ({rt:.1f}s)")
                 else:
                     result = transcriber.transcribe_video(
                         mp4_path, srt_path,

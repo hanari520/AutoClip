@@ -35,8 +35,8 @@ def parse_args():
     parser.add_argument('--verbose', '-v', action='store_true',
                         help='显示详细进度')
     parser.add_argument('--engine', '-e', type=str, default='portable',
-                        choices=['portable', 'whisper', 'funasr', 'belle', 'qwen3'],
-                        help='ASR引擎: portable (GPU便携版推荐) / whisper / funasr / belle / qwen3')
+                        choices=['portable', 'whisper', 'funasr', 'belle', 'qwen3', 'moss'],
+                        help='ASR引擎: portable (GPU便携版推荐) / whisper / funasr / belle / qwen3 / moss')
     parser.add_argument('--funasr-model', type=str, default='sensevoice',
                         help='FunASR模型 (默认: sensevoice)')
     parser.add_argument('--qwen3-model', type=str, default='Qwen3-ASR-1.7B',
@@ -84,6 +84,7 @@ def main():
         'portable': 'FunASR GPU便携版', 'funasr': 'FunASR Direct',
         'whisper': 'Whisper', 'belle': 'Belle-whisper-large-v3-turbo-zh',
         'qwen3': 'Qwen3-ASR-1.7B + ForcedAligner',
+        'moss': 'MOSS-Transcribe-Diarize (转写+说话人分离)',
     }
     print(f"{engine_display.get(args.engine, args.engine)} 字幕批量生成工具")
     if args.engine in ('portable', 'funasr'):
@@ -92,6 +93,8 @@ def main():
         print(f"模型: models/whisper/belle-whisper-large-v3-turbo-zh-ct2")
     elif args.engine == 'qwen3':
         print(f"模型: models/Qwen3-ASR-1.7B + models/Qwen3-ForcedAligner-0.6B")
+    elif args.engine == 'moss':
+        print(f"模型: models/MOSS-Transcribe-Diarize-0.9B")
     else:
         print(f"模型: {args.model}")
     print("=" * 60)
@@ -174,6 +177,10 @@ def main():
             from qwen3_asr_transcriber import Qwen3ASRTranscriber
 
             transcriber = Qwen3ASRTranscriber(model_name=args.qwen3_model)
+        elif args.engine == 'moss':
+            from moss_transcriber import MossTranscriber
+
+            transcriber = MossTranscriber()
         else:
             from whisper_transcriber import WhisperTranscriber
 
@@ -251,6 +258,18 @@ def main():
                     language=args.language,
                     verbose=args.verbose,
                 )
+            elif args.engine == 'moss':
+                result = transcriber.transcribe_video(
+                    video_path,
+                    language=args.language,
+                    verbose=args.verbose,
+                )
+                # MOSS 自带说话人分离: 保存说话人数据到JSON
+                if result.get('speaker_data'):
+                    speaker_path = os.path.splitext(video_path)[0] + '_speaker.json'
+                    with open(speaker_path, 'w', encoding='utf-8') as f:
+                        json.dump(result['speaker_data'], f, ensure_ascii=False, indent=2)
+                    print(f"  [OK] 说话人数据已保存")
             else:
                 if args.auto_lang:
                     transcriber.transcribe_with_auto_detect(

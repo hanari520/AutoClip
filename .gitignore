@@ -64,7 +64,12 @@ Desktop.ini
 *.swp
 *.swo
 qwen3_env/
+moss_env/
 .pip_cache/
+
+# Local ASR benchmark scratch dirs (large media + derived json)
+_asr_bench/
+_test_moss/
 
 # Agent-tool plugin state (local caches with machine-specific paths)
 .v2c/
