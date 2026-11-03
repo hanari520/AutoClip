@@ -83,6 +83,25 @@ class WhisperTranscriber:
 
         print("[Whisper] 模型加载完成 (openai-whisper)")
 
+    @staticmethod
+    def _detect_fw_device():
+        """faster-whisper 基于 CTranslate2 而非 torch，优先用 ctranslate2 探测。
+
+        解释器里装的是 CPU 版 torch 时，torch.cuda.is_available() 会把
+        ctranslate2 实际可用的 GPU 误判成 CPU。
+        """
+        try:
+            import ctranslate2
+            if ctranslate2.get_cuda_device_count() > 0:
+                return 'cuda'
+        except Exception:
+            pass
+        try:
+            import torch
+            return 'cuda' if torch.cuda.is_available() else 'cpu'
+        except Exception:
+            return 'cpu'
+
     def _load_faster_whisper_model(self):
         """用 faster-whisper 加载 .pt 模型（原生 Silero VAD 支持）
 
@@ -95,10 +114,9 @@ class WhisperTranscriber:
         下载只需一次，后续从缓存加载。
         """
         from faster_whisper import WhisperModel
-        import torch
 
         if self.device is None:
-            self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+            self.device = self._detect_fw_device()
 
         # faster-whisper 的 compute_type：
         #   cuda → float16（速度优先，精度足够）
@@ -120,11 +138,24 @@ class WhisperTranscriber:
 
         # faster-whisper 首次使用某模型名时会自动下载 CTranslate2 格式到缓存
         # 后续从 ~/.cache/huggingface 加载，不再下载
-        self.model = WhisperModel(
-            fw_model,
-            device=self.device,
-            compute_type=compute_type,
-        )
+        try:
+            self.model = WhisperModel(
+                fw_model,
+                device=self.device,
+                compute_type=compute_type,
+            )
+        except Exception as e:
+            # CUDA 运行库缺失(cuDNN/cuBLAS)等运行期问题：回退 CPU，不让整个引擎挂掉
+            if self.device != 'cuda':
+                raise
+            print(f"[Whisper-FW] CUDA 加载失败({e})，回退 CPU 重试")
+            self.device = 'cpu'
+            compute_type = 'int8'
+            self.model = WhisperModel(
+                fw_model,
+                device=self.device,
+                compute_type=compute_type,
+            )
         self._is_faster_whisper = True
         load_time = __import__('time').time() - t0
         print(f"[Whisper-FW] 模型加载完成 ({load_time:.1f}s, Silero VAD 可用)")
@@ -189,32 +220,21 @@ class WhisperTranscriber:
         print(f"[Whisper-HF] 模型加载完成 ({load_time:.1f}s)")
     
     def transcribe_video(self, video_path, output_srt_path=None, language="zh",
-                         verbose=False, condition_on_previous_text=True,
-                         split_sentences=True, max_segment_duration=8.0,
-                         no_speech_threshold=0.7, logprob_threshold=-0.5,
-                         initial_prompt=None, strip_punctuation=True,
-                         vad_filter=True):
-        """
-        转录视频为 SRT 字幕
+                         verbose=False):
+        """转录视频为 SRT 字幕(官方推荐配置,2026-11-01 从零重写)
+
+        openai-whisper 路径仅传 language/task/verbose,其余全部使用官方默认值:
+        temperature=(0.0..1.0) 回退调度, condition_on_previous_text=True,
+        no_speech_threshold=0.6, logprob_threshold=-1.0,
+        compression_ratio_threshold=2.4, 无 initial_prompt。
+        SRT 直接采用模型原生分段(标点保留),不拆条、不改时间。
+        旧版的句子拆分/去标点/无标点引导/收紧阈值等自定义干预已全部移除。
 
         Args:
             video_path: 视频文件路径
             output_srt_path: 输出 SRT 文件路径，None 则与视频同名
             language: 语言代码，中文为 "zh"
             verbose: 是否打印详细进度
-            condition_on_previous_text: 是否基于前文条件生成
-            split_sentences: 是否按句号拆分长句，让字幕逐句显示（默认开启）
-            max_segment_duration: 超过此秒数的 segment 会被拆分（默认 8 秒）
-            no_speech_threshold: 无人说话判定阈值（默认 0.7）。
-                                 当模型判定当前音频段无人说话的概率 > 此值时，直接舍弃该段。
-                                 faster-whisper 和 openai-whisper 都支持。
-                                 值越高越严格（更倾向保留），值越低越宽松（更容易丢弃）。
-                                 0.7 = 较为激进地丢弃静音段，减少无意义转写。
-            logprob_threshold: 低信心强制切分阈值，越高切得越碎（Whisper 默认 -1.0，这里提到 -0.5）
-            initial_prompt: Whisper 初始提示文本，用于引导输出风格（如无标点简体中文）
-            strip_punctuation: 是否移除所有标点符号（中文默认 True，让字幕更干净）
-            vad_filter: 是否启用 Silero VAD 人声检测（仅 faster-whisper 有效）。
-                        开启后自动跳过无人说话的音频段，避免产生幻觉转写。
 
         Returns:
             str: 生成的 SRT 文件路径
@@ -230,67 +250,33 @@ class WhisperTranscriber:
             output_srt_path = Path(output_srt_path)
 
         print(f"[Whisper] 开始识别字幕: {video_path.name}")
-        print(f"[Whisper] 语言: {language}")
-        print(f"[Whisper] no_speech_threshold: {no_speech_threshold}")
-        if self._is_faster_whisper and vad_filter:
-            print(f"[Whisper] Silero VAD: 已启用（自动跳过无人说话的音频段）")
-        if strip_punctuation:
-            print(f"[Whisper] 标点模式: 自动移除标点符号")
-
-        # 默认中文 initial_prompt：引导无标点、逐句分行的输出风格
-        # 注意：HF 格式模型（BELLE-2）自带中文微调，不需要 initial_prompt
-        if initial_prompt is None and language == 'zh' and not self._is_hf_format:
-            initial_prompt = (
-                "以下是简体中文普通话的转录内容"
-                "不使用任何标点符号"
-                "每句话独立显示为一行"
-            )
-            print("[Whisper] 注入 initial_prompt (无标点简体中文)")
+        print(f"[Whisper] 语言: {language} (官方默认参数)")
 
         # ── HuggingFace 格式：用 transformers pipeline 转录 ──
         if self._is_hf_format:
             result = self._transcribe_hf(video_path, language, verbose)
-        # ── faster-whisper 格式：用 Silero VAD + no_speech_threshold ──
+        # ── faster-whisper 格式：Silero VAD + 官方默认阈值 ──
         elif self._is_faster_whisper:
-            result = self._transcribe_faster_whisper(
-                video_path, language, verbose, condition_on_previous_text,
-                no_speech_threshold, logprob_threshold, initial_prompt, vad_filter
-            )
-        # ── OpenAI whisper 格式 ──
+            result = self._transcribe_faster_whisper(video_path, language, verbose)
+        # ── OpenAI whisper 格式：官方默认参数 ──
         else:
-            transcribe_kwargs = {
-                'language': language,
-                'verbose': verbose,
-                'condition_on_previous_text': condition_on_previous_text,
-                'task': 'transcribe',
-                'no_speech_threshold': no_speech_threshold,
-                'logprob_threshold': logprob_threshold,
-            }
-            if initial_prompt:
-                transcribe_kwargs['initial_prompt'] = initial_prompt
-            result = self.model.transcribe(str(video_path), **transcribe_kwargs)
-        
-        # 生成 SRT 内容（开启句子拆分）
-        srt_content = self._generate_srt(
-            result["segments"],
-            split_sentences=split_sentences,
-            max_segment_duration=max_segment_duration,
-            strip_punctuation=strip_punctuation,
-        )
-        
+            result = self.model.transcribe(
+                str(video_path), language=language, task='transcribe', verbose=verbose)
+
+        # 生成 SRT(模型原生分段原样使用,标点保留,仅过纠错字典)
+        srt_content = self._generate_srt(result["segments"])
+
         # 写入文件
         with open(output_srt_path, 'w', encoding='utf-8') as f:
             f.write(srt_content)
-        
+
         print(f"[Whisper] 字幕已保存: {output_srt_path}")
         print(f"[Whisper] 共 {len(result['segments'])} 条字幕片段")
-        
+
         return str(output_srt_path)
 
     def _transcribe_faster_whisper(self, video_path, language='zh', verbose=False,
-                                    condition_on_previous_text=True,
-                                    no_speech_threshold=0.7, logprob_threshold=-0.5,
-                                    initial_prompt=None, vad_filter=True):
+                                   vad_filter=True):
         """用 faster-whisper 转录（原生 Silero VAD 人声检测）
 
         faster-whisper 的 transcribe 返回 (segments_generator, info)，
@@ -316,17 +302,14 @@ class WhisperTranscriber:
         transcribe_kwargs = dict(
             language=language,
             task='transcribe',
-            beam_size=5,
-            condition_on_previous_text=condition_on_previous_text,
-            no_speech_threshold=no_speech_threshold,  # 0.7: 丢弃高概率无人说话的段
-            log_prob_threshold=logprob_threshold,
-            vad_filter=vad_filter,     # ← Silero VAD 开关
+            condition_on_previous_text=True,
+            vad_filter=vad_filter,     # Silero VAD(fw 路径保留,自动跳过无人声段)
             vad_parameters=vad_parameters if vad_filter else None,
         )
-        if initial_prompt:
-            transcribe_kwargs['initial_prompt'] = initial_prompt
+        # 其余参数(beam_size/no_speech_threshold/log_prob_threshold 等)
+        # 全部走 faster-whisper 官方默认值
 
-        print(f"[Whisper-FW] 开始转录 (VAD={'ON' if vad_filter else 'OFF'}, no_speech={no_speech_threshold})")
+        print(f"[Whisper-FW] 开始转录 (VAD={'ON' if vad_filter else 'OFF'})")
         t0 = _time.time()
 
         # faster-whisper 可以直接接受视频文件路径（内部用 ffmpeg 提取音频）
@@ -438,17 +421,15 @@ class WhisperTranscriber:
             'segments': all_segments,
         }
 
-    def _generate_srt(self, segments, split_sentences=True, max_segment_duration=8.0,
-                       strip_punctuation=True):
+    def _generate_srt(self, segments):
         """
-        将 Whisper 的 segments 转为 SRT 格式，并应用ASR纠错
-        支持按标点拆分长 segment，让字幕逐句显示
+        将 Whisper 的原生 segments 转为 SRT 格式(2026-11-01 从零重写)
+
+        官方分段原样使用:不拆条、不按字符比例分时、标点保留;
+        仅应用 ASR 纠错字典(项目层功能,与模型配置无关)。
 
         Args:
             segments: Whisper 转录结果中的 segments 列表
-            split_sentences: 是否按句号/问号/感叹号拆分长句（默认开启）
-            max_segment_duration: 超过此秒数的 segment 会被拆分（默认8秒）
-            strip_punctuation: 是否移除所有标点符号（默认 True，中文字幕更干净）
 
         Returns:
             str: SRT 格式字符串
@@ -463,139 +444,27 @@ class WhisperTranscriber:
             except Exception as e:
                 print(f"[ASR纠错] 初始化失败: {e}")
 
-        # 先展开 segments：如果开启拆分，按句子断开
-        expanded_segments = []
-        for segment in segments:
-            text = segment["text"].strip()
+        idx = 0
+        for seg in segments:
+            text = seg["text"].strip()
             if not text:
                 continue
-            duration = segment["end"] - segment["start"]
-
-            if split_sentences and (duration > max_segment_duration or self._has_multiple_sentences(text)):
-                sub_segments = self._split_segment_by_sentence(
-                    text, segment["start"], segment["end"]
-                )
-                expanded_segments.extend(sub_segments)
-            else:
-                expanded_segments.append({
-                    "start": segment["start"],
-                    "end": segment["end"],
-                    "text": text,
-                })
-
-        idx = 0
-        for seg in expanded_segments:
-            idx += 1
-            text = seg["text"]
 
             # 应用ASR纠错
             if corrector:
                 text = corrector.correct_text(text)
-                if text != seg["text"]:
-                    seg["text"] = text
+            if not text:
+                continue
 
-            # 移除标点符号（中文标点 + 英文标点）
-            if strip_punctuation:
-                text = seg["text"]
-                text = self._strip_all_punctuation(text)
-                seg["text"] = text
-
-            # 格式化时间
-            start_srt = self._format_time(seg["start"])
-            end_srt = self._format_time(seg["end"])
-
+            idx += 1
             srt_lines.append(f"{idx}")
-            srt_lines.append(f"{start_srt} --> {end_srt}")
+            srt_lines.append(f"{self._format_time(seg['start'])} --> "
+                             f"{self._format_time(seg['end'])}")
             srt_lines.append(text)
             srt_lines.append("")  # 空行分隔
 
         return "\n".join(srt_lines)
 
-    @staticmethod
-    def _has_multiple_sentences(text):
-        """检查文本是否包含多个句子（有 。！？?! 等句末标点）"""
-        import re
-        return bool(re.search(r'[。！？?!]', text))
-
-    @staticmethod
-    def _strip_all_punctuation(text):
-        """
-        移除所有中文和英文标点符号，只保留中文汉字、字母、数字和空格
-        先标点拆分再逐段去标点，最后用空格拼接，保证每句话独立
-        """
-        import re
-        import string
-        # 先按中文句末标点拆成短句
-        parts = re.split(r'(?<=[。！？?!])', text)
-        # 对每段去标点
-        clean_parts = []
-        for p in parts:
-            p = p.strip()
-            if not p:
-                continue
-            # 移除中文标点：Unicode CJK标点范围 + 全角标点
-            p = re.sub(r'[\u3000-\u303f\uff00-\uffef]', '', p)
-            # 移除英文标点（保留字母数字和空格）
-            en_punc = string.punctuation
-            p = p.translate(str.maketrans('', '', en_punc))
-            p = p.strip()
-            if p:
-                clean_parts.append(p)
-        return ' '.join(clean_parts) if clean_parts else text
-
-    @staticmethod
-    def _split_segment_by_sentence(text, seg_start, seg_end):
-        """
-        按中文句末标点拆分文本为多个子 segment，时间按字符数比例分配
-
-        Args:
-            text: 原始文本
-            seg_start: 原始 segment 起始时间（秒）
-            seg_end: 原始 segment 结束时间（秒）
-
-        Returns:
-            list[dict]: [{"start": float, "end": float, "text": str}, ...]
-        """
-        import re
-
-        total_duration = seg_end - seg_start
-        if total_duration <= 0:
-            return [{"start": seg_start, "end": seg_end, "text": text}]
-
-        # 按 。！？?! 拆分，保留标点在句子末尾
-        parts = re.split(r'(?<=[。！？?!])', text)
-        # 过滤空字符串
-        parts = [p.strip() for p in parts if p.strip()]
-
-        if len(parts) <= 1:
-            # 没有句末标点但 duration 很长时，尝试按逗号拆分
-            parts = re.split(r'(?<=[，,；;])', text)
-            parts = [p.strip() for p in parts if p.strip()]
-
-        if len(parts) <= 1:
-            return [{"start": seg_start, "end": seg_end, "text": text}]
-
-        # 按字符数比例分配时间
-        total_chars = sum(len(p) for p in parts)
-        if total_chars == 0:
-            return [{"start": seg_start, "end": seg_end, "text": text}]
-
-        results = []
-        current_time = seg_start
-        for p in parts:
-            duration = total_duration * (len(p) / total_chars)
-            # 最小 0.5 秒、最大不超过剩余时间
-            duration = max(0.5, duration)
-            sub_end = min(current_time + duration, seg_end)
-            results.append({
-                "start": current_time,
-                "end": sub_end,
-                "text": p,
-            })
-            current_time = sub_end
-
-        return results
-    
     def _format_time(self, seconds):
         """
         将秒数转为 SRT 时间格式 (HH:MM:SS,mmm)
@@ -691,52 +560,22 @@ def main():
                         help='启用自动语言检测')
     parser.add_argument('-v', '--verbose', action='store_true',
                         help='显示详细进度')
-    parser.add_argument('--no-split', action='store_true',
-                        help='禁用长句拆分（默认会按句号自动拆分）')
-    parser.add_argument('--max-sec', type=float, default=8.0,
-                        help='拆分阈值秒数，超过此长度的segment会被拆分（默认8秒）')
-    parser.add_argument('--noise-threshold', type=float, default=None,
-                        help='VAD 静音阈值 (0-1, 越低对停顿越敏感, 默认 0.35)')
-    parser.add_argument('--logprob-threshold', type=float, default=None,
-                        help='低信心切分阈值 (越高切越碎, 默认 -0.5, Whisper内置 -1.0)')
-    parser.add_argument('--initial-prompt', type=str, default=None,
-                        help='Whisper 初始提示文本（中文默认自动注入无标点引导）')
-    parser.add_argument('--strip-punctuation', action='store_true', default=True,
-                        help='移除字幕中的标点符号（中文默认开启）')
-    parser.add_argument('--keep-punctuation', action='store_true',
-                        help='保留标点符号（覆盖 --strip-punctuation 默认值）')
-    
+
     args = parser.parse_args()
-    
+
     # 初始化转录器
     model_path = args.model
     if model_path is None:
         project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         model_path = os.path.join(project_root, 'models', 'whisper', 'large-v3-turbo.pt')
     transcriber = WhisperTranscriber(model_path=model_path)
-    
-    # 执行转录
-    split = not args.no_split
-    strip_punc = args.strip_punctuation and not args.keep_punctuation
-    # 构建 kwargs，CLI 不传就用默认值
-    kw = {
-        'split_sentences': split,
-        'max_segment_duration': args.max_sec,
-        'strip_punctuation': strip_punc,
-    }
-    if args.noise_threshold is not None:
-        kw['no_speech_threshold'] = args.noise_threshold
-    if args.logprob_threshold is not None:
-        kw['logprob_threshold'] = args.logprob_threshold
-    if args.initial_prompt is not None:
-        kw['initial_prompt'] = args.initial_prompt
 
+    # 执行转录(官方默认参数)
     if args.auto_lang:
         transcriber.transcribe_with_auto_detect(args.video, args.output, verbose=args.verbose)
     else:
-        transcriber.transcribe_video(args.video, args.output, 
-                                      language=args.language, verbose=args.verbose,
-                                      **kw)
+        transcriber.transcribe_video(args.video, args.output,
+                                      language=args.language, verbose=args.verbose)
 
 
 if __name__ == "__main__":

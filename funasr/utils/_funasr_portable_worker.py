@@ -35,6 +35,9 @@ os.environ['TRANSFORMERS_CACHE'] = os.path.join(MODELS, 'transformers')
 if sys.platform == 'win32':
     os.add_dll_directory(torch_lib)
 os.environ['PATH'] = torch_lib + os.pathsep + os.environ.get('PATH', '')
+# funasr 内部(load_utils 等)以裸 'ffmpeg'/'ffprobe' 名起子进程；把便携 ffmpeg 目录
+# 前置进 PATH，使未做系统级安装的新机也能解析
+os.environ['PATH'] = os.path.join(ROOT, 'runtime', 'ffmpeg') + os.pathsep + os.environ.get('PATH', '')
 
 # ---------------------------------------------------------------------------
 # 模型路径映射
@@ -56,17 +59,20 @@ PUNC_MODEL = os.path.join(MODELS, 'models', 'iic',
 # cam++ 说话人分离模型(本地路径,避免联网下载)
 SPK_MODEL = os.path.join(MODELS, 'models', 'iic', 'speech_campplus_sv_zh-cn_16k-common')
 
-# paraformer-zh 官方推荐参数（ModelScope 模型卡/README 用法）
-# 其余参数一律走 funasr 1.3.9 内置默认：
-#   - batch_size_threshold_s 默认 60，spk_mode 默认 punc_segment
-#   - language / use_itn 是 SenseVoice 专用参数，对 Paraformer 无效，已移除
-#   - preset_spk_num 非官方推荐项，移除后 cam++ 自动聚类说话人数
+# paraformer-zh 官方推荐参数（模型卡 README「基于FunASR进行推理」章节用法，从零重写）：
+#   AutoModel(model=..., vad_model=..., punc_model=..., spk_model=..., device=...)
+#   model.generate(input=..., batch_size_s=300, hotword=...)
+# 对应关系：
+#   - AutoModel 侧：模型/VAD/标点/说话人均传本地路径（见 _paraformer_model_kwargs），
+#     model_revision 等联网修订号对本地路径无效，不传
+#   - generate 侧 = PARAFORMER_ZH_CONFIG + 可选 hotword，在 transcribe_paraformer 传入
+#   - batch_size_s=300：官方推荐值，funasr 1.3.9 内置默认亦为 300（auto_model.py:639），
+#     显式写出防漂移
+#   - vad_kwargs：官方用法未指定，不传时走 fsmn-vad 自身 config.yaml 默认
+#     （max_single_segment_time=60000）；此前 30s 为旧项目调优值，需收紧时在此追加
+#     {'vad_kwargs': {'max_single_segment_time': 30000}}
+#   - language / use_itn 是 SenseVoice 专用参数，preset_spk_num 非官方推荐项，均不设置
 PARAFORMER_ZH_CONFIG = {
-    'vad_kwargs': {
-        # VAD 段长上限 30s（README 推荐值；2026-08-30 拍板，默认 60s）
-        'max_single_segment_time': 30000,
-    },
-    # 官方推荐 batch_size_s=300（funasr 1.3.9 默认值，显式写出防漂移）
     'batch_size_s': 300,
 }
 
@@ -403,73 +409,55 @@ def transcribe_sensevoice(video_path, output_path, language, device,
     }
 
 
-def _split_text_to_utterances(text, n_parts):
+def _merge_char_timestamps(timestamps):
+    """合并逐字时间戳为 utterance 组(仅按语音停顿切分:字间隔 >500ms 才切段,
+    不设时长上限,避免把"十一月"这类词拦腰切断)
+
+    返回 (合并组 [[start_ms, end_ms], ...], 每个时间戳所属的组号列表)
     """
-    将全文按中文标点切分,再按比例分配到 n_parts 个 utterance 段。
-    输入: 合并后的时间戳个数
-    输出: 等长的文本段列表
-    """
-    import re
-    if n_parts <= 1:
-        return [text]
-    # 按标点拆句子
-    sentences = re.split(r'(?<=[。!?,、;:\n\.\!\?,;:])', text)
-    sentences = [s.strip() for s in sentences if s.strip()]
-    if not sentences:
-        return [text]
-    # 如果全文只有 1 句(无标点),按字数比例均分
-    if len(sentences) == 1:
-        full = sentences[0]
-        # 先按空格分词
-        words = full.split()
-        if len(words) >= n_parts:
-            # 词够多:按词数比例分配
-            result = []
-            words_per = len(words) / n_parts
-            for i in range(n_parts):
-                start = int(i * words_per)
-                end = int((i + 1) * words_per)
-                result.append(' '.join(words[start:end]))
-            return result
+    merged = []
+    ts_group = []
+    grp_start, grp_end = int(timestamps[0][0]), int(timestamps[0][1])
+    for j, ts in enumerate(timestamps):
+        s, e = int(ts[0]), int(ts[1])
+        if j == 0:
+            ts_group.append(0)
+            continue
+        if s - grp_end <= 500:
+            grp_end = e
         else:
-            # 词不够:直接按字符比例分
-            result = []
-            chars_per = len(full) / n_parts
-            for i in range(n_parts):
-                start = int(i * chars_per)
-                end = int((i + 1) * chars_per)
-                result.append(full[start:end].strip())
-            return result
-    if len(sentences) <= n_parts:
-        # 不够分,用空格填
-        result = sentences[:]
-        while len(result) < n_parts:
-            result.append('')
-        return result
-    # 句子比 utterance 多,按比例归并
-    result = []
-    ratio = len(sentences) / n_parts
-    for i in range(n_parts):
-        start = int(i * ratio)
-        end = int((i + 1) * ratio)
-        chunk = ''.join(sentences[start:end])
-        result.append(chunk)
-    return result
+            merged.append([grp_start, grp_end])
+            grp_start, grp_end = s, e
+        ts_group.append(len(merged))
+    merged.append([grp_start, grp_end])
+    return merged, ts_group
 
 
-def _clean_punctuation(text):
+# 视为标点/空白的字符:不占时间戳,切分时跟随其前一个字符
+_PUNCT_AND_SPACE = set(
+    '，。！？、；：·…—,.!?;:()[]{}《》〈〉【】“”‘’"\'~～\u3000 \t\n\r-_'
+)
+
+
+def _align_text_to_groups(text, ts_group, ts_list):
+    """把全文按字符级时间戳精确对齐切分,返回 [(start_ms, end_ms, seg_text), ...]
+
+    Paraformer 的 timestamp 与"非标点"字符一一对应;标点/空白跟随其前一个字符
+    所在组(句首标点归首组,超出时间戳的尾部字符归末组兜底)。旧版"按句数比例
+    分配"启发式在句数少于时间组数时会把尾部内容整段丢弃(长音频必现)。
     """
-    句中标点用空格代替,结尾不留空格。
-    处理中英文标点:,。!?、;:""''()...- ,.!?;:()
-    """
-    import re
-    # 中文标点 → 空格
-    text = re.sub(r'[,。!?、;:""''()...-]', ' ', text)
-    # 英文标点 → 空格(保留字母数字周边的)
-    text = re.sub(r'[,!?;:()\.]', ' ', text)
-    # 合并多余空格,去首尾
-    text = re.sub(r'\s+', ' ', text).strip()
-    return text
+    parts = [''] * len(ts_list)
+    ts_i = 0
+    for ch in text:
+        if ch in _PUNCT_AND_SPACE:
+            parts[ts_group[ts_i - 1] if ts_i > 0 else 0] += ch
+            continue
+        if ts_i < len(ts_group):
+            parts[ts_group[ts_i]] += ch
+            ts_i += 1
+        else:
+            parts[-1] += ch  # 字符多于时间戳(异常)时兜底,不丢内容
+    return [(int(gs), int(ge), parts[gi]) for gi, (gs, ge) in enumerate(ts_list)]
 
 
 def _merge_cjk_spaces(text):
@@ -483,34 +471,31 @@ def _merge_cjk_spaces(text):
 
 
 def _paraformer_model_kwargs(model_name, device, vad_enabled, punc_enabled, enable_speaker):
-    """构造 Paraformer AutoModel 参数（VAD/标点/说话人按模型与开关组装）"""
+    """构造 Paraformer AutoModel 参数（官方 README 用法，模型与辅助模型均传本地路径）
+
+    generate 侧参数（batch_size_s/hotword）按官方写法在 transcribe_paraformer 传入，
+    不混入 AutoModel 构造参数。
+    """
     model_path = MODEL_PATHS.get(model_name)
     if not model_path or not os.path.isdir(model_path):
         model_path = f"iic/{model_name}"
 
     model_kwargs = {'model': model_path, 'device': device, 'disable_update': True}
 
-    # paraformer-zh 应用官方推荐配置（仅该模型，不影响其他模型）
-    if model_name == 'paraformer-zh':
-        model_kwargs.update(PARAFORMER_ZH_CONFIG)
-        if not vad_enabled:
-            model_kwargs.pop('vad_kwargs', None)
-
     # 长音频模型自带 VAD+标点,但允许叠加外部 VAD 控制分段粒度
     is_long_audio = 'large-zh' in model_name
     if vad_enabled and os.path.isdir(VAD_MODEL):
-        if model_name == 'paraformer-zh':
-            # 参考配置自带 vad_kwargs，只需补充模型路径
-            model_kwargs['vad_model'] = VAD_MODEL
-        else:
-            model_kwargs['vad_model'] = VAD_MODEL
+        model_kwargs['vad_model'] = VAD_MODEL
+        if model_name != 'paraformer-zh':
+            # 官方 paraformer-zh 用法不传 vad_kwargs（走 VAD 模型默认）；
+            # 其余模型维持原 30s 分段上限
             model_kwargs['vad_kwargs'] = {'max_single_segment_time': 30000}
     if not is_long_audio and os.path.isdir(PUNC_MODEL):
-        # 标点模型:非长音频版始终加载(保时间戳分割),no_punc 只在文案层处理
+        # 标点模型:非长音频版始终加载(字幕文本的标点由它提供,始终保留标点)
         # 长音频版自带标点,不重复加载
         model_kwargs['punc_model'] = PUNC_MODEL
 
-    # 说话人分离（cam++），参考配置指定 preset_spk_num=5
+    # 说话人分离（cam++），不指定 preset_spk_num 由模型自动聚类说话人数
     if enable_speaker and os.path.isdir(SPK_MODEL):
         model_kwargs['spk_model'] = SPK_MODEL
 
@@ -518,10 +503,12 @@ def _paraformer_model_kwargs(model_name, device, vad_enabled, punc_enabled, enab
 
 
 def transcribe_paraformer(video_path, output_path, model_name, device, vad_enabled,
-                          punc_enabled, enable_speaker=False, model=None):
+                          punc_enabled, enable_speaker=False, model=None, hotword=None):
     """Paraformer 管道:自带 VAD+时间戳,直接出 SRT
 
     model: 批处理模式传入常驻 AutoModel 复用;None=单文件模式自加载
+    hotword: 热词,空格分隔字符串或热词 txt 文件路径（官方 generate 参数,可选）
+    punc_enabled: 兼容保留位;paraformer 文本始终保留标点,不做去标点处理
     """
     from funasr import AutoModel
 
@@ -540,7 +527,13 @@ def transcribe_paraformer(video_path, output_path, model_name, device, vad_enabl
     print(f"[Worker] Transcribing: {os.path.basename(video_path)} "
           f"({os.path.getsize(video_path)/1024/1024:.1f}MB)", flush=True)
     t0 = time.time()
-    result = model.generate(input=video_path)
+    # generate 参数按官方 README:batch_size_s=300 + 可选热词（仅 paraformer-zh）
+    generate_kwargs = {'input': video_path}
+    if model_name == 'paraformer-zh':
+        generate_kwargs.update(PARAFORMER_ZH_CONFIG)
+    if hotword:
+        generate_kwargs['hotword'] = hotword
+    result = model.generate(**generate_kwargs)
     transcribe_time = time.time() - t0
 
     # Paraformer 结果自带 timestamp,按分段生成 SRT
@@ -559,41 +552,29 @@ def transcribe_paraformer(video_path, output_path, model_name, device, vad_enabl
 
             timestamps = seg_item.get('timestamp', [])
             if timestamps and len(timestamps) > 0:
-                has_sentence_info = 'sentence_info' in seg_item
+                si = seg_item.get('sentence_info')
 
-                # 合并短时间戳为 utterance 段(无 sentence_info 时)
-                if has_sentence_info:
-                    ts_list = [[int(ts[0]), int(ts[1])] for ts in timestamps]
+                if si:
+                    # 标点后处理返回句级信息:直接用句子的文本与自带时间
+                    items = []
+                    for sent in si:
+                        if not isinstance(sent, dict):
+                            continue
+                        st = int(sent.get('start', 0) or 0)
+                        en = int(sent.get('end', 0) or 0)
+                        stx = sent.get('text', '')
+                        if stx.strip():
+                            items.append((st, en, stx))
                 else:
-                    # 合并间隔 < 500ms 和时长 < 2s 的相邻语音段
-                    merged = []
-                    grp_start, grp_end = int(timestamps[0][0]), int(timestamps[0][1])
-                    for ts in timestamps[1:]:
-                        s, e = int(ts[0]), int(ts[1])
-                        # 间隔 ≤500ms 且当前组还不长 → 合并
-                        if s - grp_end <= 500 and (e - grp_start) < 8000:
-                            grp_end = e
-                        else:
-                            merged.append([grp_start, grp_end])
-                            grp_start, grp_end = s, e
-                    merged.append([grp_start, grp_end])
-                    ts_list = merged
-                    # 用中文标点续断处切分全文,按时间比例分配到各 utterance
-                    text_parts = _split_text_to_utterances(text, len(ts_list))
+                    # 合并字级时间戳为 utterance 段(仅按语音停顿:间隔 >500ms 才切),
+                    # 文本按字符级时间戳精确对齐切分——旧的"按比例分配"启发式在
+                    # 句数少于时间组数时会把尾部内容整段丢掉(长音频必现)
+                    ts_list, ts_group = _merge_char_timestamps(timestamps)
+                    items = _align_text_to_groups(text, ts_group, ts_list)
 
-                for i, ts in enumerate(ts_list):
-                    if not isinstance(ts, (list, tuple)) or len(ts) < 2:
-                        continue
-                    start_ms, end_ms = int(ts[0]), int(ts[1])
+                for i, (start_ms, end_ms, seg_text) in enumerate(items):
                     if end_ms - start_ms < 500:  # 合并后仍太短 → 跳过
                         continue
-
-                    # 从 sentence_info 取分段文本(如果有)
-                    if has_sentence_info:
-                        si = seg_item['sentence_info']
-                        seg_text = si[i].get('text', '') if i < len(si) else ''
-                    else:
-                        seg_text = text_parts[i] if i < len(text_parts) else text
 
                     # 长音频模型输出是空格分隔的单字，合并 CJK 间的空格
                     if 'large-zh' in model_name:
@@ -627,8 +608,8 @@ def transcribe_paraformer(video_path, output_path, model_name, device, vad_enabl
                         f"{format_srt_time(end_ms / 1000)}"
                     )
                     spk_prefix = f'[SPK:{spk_id}] ' if spk_id is not None else ''
-                    display_text = seg_text if punc_enabled else _clean_punctuation(seg_text)
-                    srt_lines.append(f'{spk_prefix}{display_text}')
+                    # 标点始终保留(2026-11-01 起:不做去标点处理)
+                    srt_lines.append(f'{spk_prefix}{seg_text}')
                     srt_lines.append('')
             else:
                 # 无 timestamp:整个作为一段
@@ -636,16 +617,14 @@ def transcribe_paraformer(video_path, output_path, model_name, device, vad_enabl
                 total_chars += len(text)
                 srt_lines.append(str(segment_count))
                 srt_lines.append("00:00:00,000 --> 00:00:05,000")
-                display_text = text[:2000] if punc_enabled else _clean_punctuation(text[:2000])
-                srt_lines.append(display_text)
+                srt_lines.append(text[:2000])
                 srt_lines.append('')
 
     if segment_count == 0:
         # 回退
         text = str(result[0].get('text', '')) if result else ''
         if text:
-            display_text = text[:2000] if punc_enabled else _clean_punctuation(text[:2000])
-            srt_lines = ["1", "00:00:00,000 --> 00:00:05,000", display_text, ""]
+            srt_lines = ["1", "00:00:00,000 --> 00:00:05,000", text[:2000], ""]
             segment_count = 1
             total_chars = len(text)
 
@@ -683,6 +662,7 @@ def run_batch(manifest_path):
     enable_speaker = bool(manifest.get('speaker'))
     punc_enabled = bool(manifest.get('punc', True))
     vad_enabled = bool(manifest.get('vad', True))
+    hotword = manifest.get('hotword') or None
 
     if not items:
         print(json.dumps({'error': 'Batch manifest has no items'}), flush=True)
@@ -694,8 +674,8 @@ def run_batch(manifest_path):
     if device is None:
         import torch
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    print(f"[Worker] Batch: {len(items)} items | model: {model_name} | device: {device}",
-          flush=True)
+    print(f"[Worker] Batch: {len(items)} items | model: {model_name} | device: {device}"
+          + (" | hotword: on" if hotword else ""), flush=True)
 
     # 检查 FFmpeg（SenseVoice 模式抽音频段必需）
     ffmpeg_path = os.path.join(ROOT, 'runtime', 'ffmpeg', 'ffmpeg.exe')
@@ -756,7 +736,7 @@ def run_batch(manifest_path):
             else:
                 info = transcribe_paraformer(inp, outp, model_name, device, vad_enabled,
                                              punc_enabled, enable_speaker=enable_speaker,
-                                             model=pf_model)
+                                             model=pf_model, hotword=hotword)
             ok_count += 1
             entry = {'type': 'item', 'index': idx, 'status': 'ok',
                      'input': inp, 'output': outp,
@@ -787,6 +767,8 @@ def main():
     parser.add_argument('--model', default='sensevoice',
                         choices=['sensevoice', 'paraformer-zh', 'paraformer-en', 'paraformer-large-zh'])
     parser.add_argument('--language', default='zh', help='语言代码')
+    parser.add_argument('--hotword', default=None,
+                        help='热词:空格分隔字符串或热词txt文件路径(仅 Paraformer 模型生效)')
     parser.add_argument('--device', default=None, help='设备 (cuda/cpu)')
     parser.add_argument('--vad', action='store_true', default=True, help='启用 VAD')
     parser.add_argument('--no-vad', dest='vad', action='store_false', help='禁用 VAD')
@@ -842,7 +824,7 @@ def main():
     else:
         info = transcribe_paraformer(args.input, args.output, args.model, device,
                                      args.vad, args.punc,
-                                     enable_speaker=args.speaker)
+                                     enable_speaker=args.speaker, hotword=args.hotword)
 
     result_json = {
         'status': 'ok',

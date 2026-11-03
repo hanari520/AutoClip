@@ -108,11 +108,25 @@ class FunASRTranscriber:
         if device:
             self.device = device
         elif backend == 'portable':
-            self.device = 'cuda' if self._check_portable_cuda() else 'cpu'
+            probe = self._check_portable_cuda()
+            if probe is None:
+                # 探测超时/失败(未知)时留空，由 portable worker 进程内
+                # 用 torch.cuda.is_available() 兜底，避免调用方误判回落 CPU
+                self.device = None
+            else:
+                self.device = 'cuda' if probe else 'cpu'
         else:
             self.device = 'cuda' if self._check_cuda() else 'cpu'
         self.hotwords = hotwords or []
         self.model = None  # 仅 direct/whisper 后端使用
+
+    def _device_label(self):
+        """设备显示名；None 表示未定，由 worker 进程内检测"""
+        if self.device == 'cuda':
+            return 'GPU'
+        if self.device == 'cpu':
+            return 'CPU'
+        return '自动检测'
 
     def _check_cuda(self):
         try:
@@ -122,6 +136,13 @@ class FunASRTranscriber:
             return False
 
     def _check_portable_cuda(self):
+        """探测便携版 Python 的 CUDA 可用性。
+
+        返回 True/False；探测本身失败(超时/异常)时返回 None 表示未知，
+        调用方据此把 device 留空、交给 worker 进程内自行检测兜底。
+        冷启动首次 import torch 可能被杀毒软件实时扫描拖过 20 秒，
+        超时误判会静默回落 CPU，所以超时不能当作"无 GPU"。
+        """
         if not os.path.exists(self.PORTABLE_PYTHON):
             return False
         try:
@@ -133,11 +154,15 @@ class FunASRTranscriber:
                 ],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                timeout=20,
+                timeout=60,
             )
             return proc.returncode == 0
-        except Exception:
-            return False
+        except subprocess.TimeoutExpired:
+            print("[FunASR] 警告: CUDA 探测超时(60s)，将交给 worker 进程内自动检测")
+            return None
+        except Exception as e:
+            print(f"[FunASR] 警告: CUDA 探测失败({e})，将交给 worker 进程内自动检测")
+            return None
 
     # ------------------------------------------------------------------
     # Portable 后端
@@ -213,13 +238,16 @@ class FunASRTranscriber:
             cmd.append('--speaker')
         if not punc_enabled:
             cmd.append('--no-punc')
+        if self.hotwords:
+            # 官方热词用法:空格分隔字符串,仅 Paraformer 模型响应(sensevoice 忽略)
+            cmd.extend(['--hotword', ' '.join(self.hotwords)])
 
         if self.device == 'cpu':
             cmd.extend(['--device', 'cpu'])
         elif self.device == 'cuda':
             cmd.extend(['--device', 'cuda'])
 
-        print(f"[FunASR] Portable 转录 {'GPU' if self.device == 'cuda' else 'CPU'}")
+        print(f"[FunASR] Portable 转录 {self._device_label()}")
         print(f"[FunASR] 模型: {self.model_name}")
         print(f"[FunASR] 输入: {Path(video_path).name}")
 
@@ -321,6 +349,9 @@ class FunASRTranscriber:
             'speaker': bool(enable_speaker),
             'punc': bool(punc_enabled),
         }
+        if self.hotwords:
+            # 官方热词用法:空格分隔字符串,worker 端 generate(hotword=...) 传入
+            manifest['hotword'] = ' '.join(self.hotwords)
 
         import tempfile
         fd, manifest_path = tempfile.mkstemp(prefix='autoclip_batch_', suffix='.json')
@@ -330,7 +361,7 @@ class FunASRTranscriber:
 
             cmd = [self.PORTABLE_PYTHON, self.PORTABLE_WORKER,
                    '--batch-manifest', manifest_path]
-            print(f"[FunASR] Portable 批量转录 {'GPU' if self.device == 'cuda' else 'CPU'} "
+            print(f"[FunASR] Portable 批量转录 {self._device_label()} "
                   f"× {len(manifest['items'])} 个文件 (模型加载一次)")
             print(f"[FunASR] 模型: {self.model_name}")
 
@@ -528,7 +559,12 @@ class FunASRTranscriber:
             model_path=model_path,
             device=self.device,
         )
-        return wt.transcribe_video(video_path, output_srt_path, language, verbose)
+        result = wt.transcribe_video(video_path, output_srt_path, language, verbose)
+        # WhisperTranscriber.transcribe_video 返回 SRT 路径字符串,
+        # 归一化成与其他后端一致的 dict,避免调用方按 dict 取值时报错
+        if isinstance(result, str):
+            result = {'srt_path': result}
+        return result
 
     # ------------------------------------------------------------------
     # 通用工具方法

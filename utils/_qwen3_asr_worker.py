@@ -48,8 +48,7 @@ LANGUAGE_MAP = {
 # 句末标点(切断字幕行) / 句中标点(行内暂停点)
 SENTENCE_END = '。！？!?…；;'
 CLAUSE_MARK = '，,、：:'
-# 单条字幕字符数上限(硬断) / 遇句中标点且已超此长度时断
-MAX_CUE_CHARS = 32
+# 遇句中标点且已超此长度时断(按标点断,不做无停顿的长度硬断)
 CLAUSE_MIN_CHARS = 12
 # 相邻 token 间静默超过此值时断句
 SILENCE_GAP_SEC = 1.2
@@ -248,11 +247,6 @@ def group_items_to_cues(text, items, chunk_offset):
         end_text = tok_start + len(tok_text)
         if any(p in SENTENCE_END for p in between):
             close_cue(cue_start_token, ti, end_text + _trailing_span(between), cue_start_text)
-            cue_start_token = ti + 1
-            cue_start_text = next_start
-            open_tokens = False
-        elif span_len >= MAX_CUE_CHARS:
-            close_cue(cue_start_token, ti, end_text, cue_start_text)
             cue_start_token = ti + 1
             cue_start_text = next_start
             open_tokens = False

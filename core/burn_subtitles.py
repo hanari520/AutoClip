@@ -168,56 +168,45 @@ def calc_max_chars(play_res_x, font_size, margin_l=80, margin_r=80):
     return max(1, int(usable / font_size * 0.88))
 
 
-def strip_trailing_punct(text):
-    """去掉行尾中文标点符号（，。！？?!;；：、）"""
-    return re.sub(r'[，。！？?!;；：、]+$', '', text.strip())
+def wrap_to_fit_lines(text, max_chars_per_line):
+    """把超长文本按每行字符上限折成多行(调用方用 \\N 连接,仍属同一条字幕事件)。
 
-
-def split_to_fit_lines(text, max_chars_per_line):
-    """
-    将超长文本拆分为多个单行（不换行），每行去掉末尾标点。
-    优先在句号/问号/感叹号处断句，其次在逗号/分号，最后硬断。
+    断点优先级:句末标点 > 逗号/分号/冒号/顿号 > 空格 > 硬断;
+    标点保留在行内(断点标点留在当前行尾)。
 
     Returns:
-        list[str]: 拆分后的行列表，每行不超过 max_chars_per_line 且无末尾标点
+        list[str]: 折行后的行列表,每行不超过 max_chars_per_line
     """
     if not text or max_chars_per_line <= 0:
-        return [strip_trailing_punct(text)] if text else []
+        return [text] if text else []
 
-    # 先把已有 \N 换行拆开
-    raw_lines = text.split('\\N')
     result = []
-
-    for line in raw_lines:
-        stripped = strip_trailing_punct(line)
-        if not stripped:
+    # 已有 \N 换行的先拆开,逐段折行
+    for seg in text.split('\\N'):
+        if len(seg) <= max_chars_per_line:
+            result.append(seg)
             continue
 
-        if len(stripped) <= max_chars_per_line:
-            result.append(stripped)
-            continue
-
-        # 超长了，拆成多段
-        remaining = stripped
+        remaining = seg
         while remaining:
             if len(remaining) <= max_chars_per_line:
-                result.append(strip_trailing_punct(remaining))
+                result.append(remaining)
                 break
 
             cut_at = max_chars_per_line
             best = -1
-            # 第一优先：句末标点
+            # 第一优先:句末标点
             for punct in ['。', '！', '？', '?', '!']:
                 pos = remaining[:cut_at].rfind(punct)
                 if pos > best:
                     best = pos
-            # 第二优先：逗号/分号
+            # 第二优先:逗号/分号
             if best < max_chars_per_line // 3:
                 for punct in ['，', '；', ';', ',', ':', '、']:
                     pos = remaining[:cut_at].rfind(punct)
                     if pos > best:
                         best = pos
-            # 第三优先：空格
+            # 第三优先:空格
             if best < max_chars_per_line // 3:
                 pos = remaining[:cut_at].rfind(' ')
                 if pos > best:
@@ -226,25 +215,12 @@ def split_to_fit_lines(text, max_chars_per_line):
             if best <= 0:
                 best = cut_at
             else:
-                best = best + 1  # 包含标点本身，让断句更自然
+                best = best + 1  # 断点标点留在当前行尾,断句更自然
 
-            part = remaining[:best]
-            # 去掉断点处可能残留的标点
-            part = strip_trailing_punct(part)
-            if part:
-                result.append(part)
-            remaining = remaining[best:].lstrip('，。！？?!;；：、 ')
+            result.append(remaining[:best])
+            remaining = remaining[best:].lstrip()
 
     return result
-
-
-def wrap_subtitle_text(text, max_chars_per_line):
-    """
-    【已废弃的首选路径 — 改为使用 split_to_fit_lines 逐条拆分】
-    长字幕自动换行，保证不超过视频横向分辨率。
-    """
-    lines = split_to_fit_lines(text, max_chars_per_line)
-    return '\\N'.join(lines)
 
 
 def sec_to_ass_time(seconds):
@@ -274,7 +250,8 @@ def create_ass(subs, output_path, start_offset, end_offset, style_config):
     margin_l = s.get('margin_l', 80)
     margin_r = s.get('margin_r', 80)
 
-    # 计算每行最大字符数（自动根据实际分辨率+字号+边距）
+    # 每行最大字符数（自动根据实际分辨率+字号+边距）
+    # 用于把超宽字幕折成多行显示(\N 连接,同一条事件内),不拆事件、不切 SRT
     max_chars = s.get('max_line_chars', 0)
     if max_chars <= 0:
         max_chars = calc_max_chars(play_res_x, font_size, margin_l, margin_r)
@@ -319,30 +296,14 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 r'^\[(?:HAPPY|SAD|ANGRY|NEUTRAL|SURPRISED|FEARFUL|DISGUSTED|EMOTIONAL)\]\s*',
                 '', sub['text'])
             raw_text = clean.replace('\n', '\\N')
-            # 拆成不换行的单条字幕（去掉行尾标点，超长则分成多条各有自己的时间窗）
-            lines = split_to_fit_lines(raw_text, max_chars)
-            if not lines:
+            # 一条 SRT = 一条烧录事件,时间窗与 SRT 完全一致,标点原样保留;
+            # 超出每行上限时按上限折成多行(\N 连接)同屏显示,不拆事件、不分时
+            display_text = '\\N'.join(wrap_to_fit_lines(raw_text, max_chars))
+            if not display_text:
                 continue
-
-            # 按字符数比例分配时间给每条子字幕
-            total_chars = sum(len(ln) for ln in lines)
-            cursor = rel_start
-            for ln in lines:
-                char_ratio = len(ln) / total_chars if total_chars > 0 else 1.0 / len(lines)
-                seg_dur = sub_dur * char_ratio
-                seg_start = cursor
-                seg_end = min(cursor + seg_dur, rel_end)
-                if seg_end - seg_start < 0.5:
-                    seg_end = min(seg_start + 0.5, rel_end)
-                cursor = seg_end
-
-                start_str = sec_to_ass_time(seg_start)
-                end_str = sec_to_ass_time(seg_end)
-
-                # 原生 BorderStyle=1 投影，单条事件即可
-                events.append(
-                    f"Dialogue: 0,{start_str},{end_str},Main,,0,0,0,,{ln}"
-                )
+            events.append(
+                f"Dialogue: 0,{sec_to_ass_time(rel_start)},{sec_to_ass_time(rel_end)},Main,,0,0,0,,{display_text}"
+            )
 
     with open(output_path, 'w', encoding='utf-8-sig') as f:
         f.write(header + '\n'.join(events))
