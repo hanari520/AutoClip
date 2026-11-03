@@ -18,8 +18,8 @@
     "recursive": false
   },
   "step2_subtitle": {
-    "engine": "funasr",
-    "model": "SenseVoiceSmall",
+    "engine": "portable",
+    "model": "paraformer-zh",
     "language": "zh",
     "vad": true,
     "speaker_diarization": false
@@ -35,7 +35,7 @@
     "enabled": false,
     "skip_asr": false,
     "engine": "qwen3",
-    "model": "Qwen3-ASR-0.6B",
+    "model": "Qwen3-ASR-1.7B",
     "language": "zh",
     "vad": true,
     "font": "MaoKenShiJinHei-2.ttf",

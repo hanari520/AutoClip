@@ -50,5 +50,3 @@ timestamp 格式为 "HH:MM:SS-HH:MM:SS",是相对于该 segment 视频起始时�
     "cover_text_2": "封面文字2(补充或吐槽,如:连胜中断破防了!)",
     "summary": "1-2 句总结片段内容(根据字幕自动纠错还原原意)",
     "highlight_reason": "说明为何这是高光/有意思片段,并标注对应的梗(如有)"
-
-
