@@ -260,16 +260,15 @@ def get_video_duration(video_path):
     return 0
 
 
-# 高光数量推荐规则：每 30 分钟产出 1-3 个，按时长线性递推（仅作 LLM 软提示，无硬截断）
+# 高光数量推荐规则：每 30 分钟至少 1 个，按时长线性递推（仅作 LLM 软提示，数量不设上限）
 CLIP_UNIT_SECONDS = 30 * 60
 
 
-def compute_clip_range(duration_seconds):
-    """按每 30 分钟 1-3 个高光线性递推推荐数量区间（时长四舍五入到最近的 30 分钟档）"""
+def compute_min_clips(duration_seconds):
+    """按每 30 分钟至少 1 个高光给出推荐数量下限（时长四舍五入到最近的 30 分钟档），不设上限"""
     if duration_seconds <= 0:
-        return 1, 3
-    units = max(1, round(duration_seconds / CLIP_UNIT_SECONDS))
-    return units, units * 3
+        return 1
+    return max(1, round(duration_seconds / CLIP_UNIT_SECONDS))
 
 
 # ============================================================
@@ -1333,13 +1332,13 @@ def run_llm_mode(config, matched_files):
         if emotion_summary:
             emotion_hint = f"\n【情绪分析摘要】\n{emotion_summary}\n该视频的情绪分布已提供，请优先关注情绪高涨（兴奋、开心、惊讶）的片段，这些片段通常包含更多节目效果。"
         
-        # 获取视频时长，按每 30 分钟 1-3 个线性递推给出推荐片段数量区间
+        # 获取视频时长，按每 30 分钟至少 1 个线性递推给出推荐片段数量下限（不设上限）
         # 先四舍五入成整数分钟再递推：提示词里的"约N分钟"与数量判定保证同一口径
         video_path = os.path.join(config['input_dir'], item['video'])
         duration_s = get_video_duration(video_path)
         duration_min = round(duration_s / 60)
-        min_c, max_c = compute_clip_range(duration_min * 60)
-        clip_count_hint = f"4. 本视频时长约{duration_min:.0f}分钟，请**精选 {min_c}-{max_c} 个**最精彩的高光片段（宁缺毋滥，不要凑数）"
+        min_c = compute_min_clips(duration_min * 60)
+        clip_count_hint = f"4. 本视频时长约{duration_min:.0f}分钟，请提取**至少 {min_c} 个**最精彩的高光片段，数量不设上限，精彩内容有多少就提取多少（宁缺毋滥，不要凑数）"
         
         prompt = f"""{base_prompt}
 
