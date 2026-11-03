@@ -235,7 +235,9 @@ class WorkerThread(QThread):
                 universal_newlines=True,
                 encoding='utf-8',
                 errors='ignore',
-                env=env
+                env=env,
+                # 无控制台（pythonw）运行时避免子进程弹出黑色窗口
+                creationflags=(subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
             )
             
             # 读取输出
@@ -482,7 +484,8 @@ class WorkerThread(QThread):
                 self.process = subprocess.Popen(
                     cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                     bufsize=1, universal_newlines=True, encoding='utf-8',
-                    errors='ignore', env=env, cwd=PROJECT_ROOT
+                    errors='ignore', env=env, cwd=PROJECT_ROOT,
+                    creationflags=(subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
                 )
                 for line in self.process.stdout:
                     if self.stop_requested:

@@ -544,6 +544,8 @@ def terminate_process_tree(proc):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 timeout=10,
+                # 无控制台（pythonw）运行时避免子进程弹出黑色窗口
+                creationflags=(subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0),
             )
             output = (result.stdout or result.stderr or "").strip()
             return result.returncode == 0, output or f"taskkill exit {result.returncode}"
@@ -605,6 +607,7 @@ def run_pipeline(input_dir, steps, streamer, folder):
             cwd=PROJECT_ROOT,
             env={**os.environ, "PYTHONIOENCODING": "utf-8"},
             bufsize=1,
+            creationflags=(subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0),
         )
 
         for line in pipeline_proc.stdout:
@@ -2746,7 +2749,8 @@ def main():
     try:
         result = subprocess.run(
             ["tailscale", "ip", "-4"],
-            capture_output=True, text=True, timeout=5)
+            capture_output=True, text=True, timeout=5,
+            creationflags=(subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0))
         if result.returncode == 0:
             ts_ip = result.stdout.strip().split("\n")[0]
     except Exception:
